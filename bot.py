@@ -1,9 +1,9 @@
 """
-Asistente Personal - Bot de Telegram con Google Gemini (GRATIS)
-===============================================================
+Asistente Personal - Bot de Telegram con Groq (GRATIS)
+======================================================
 Variables de entorno necesarias en Railway:
   TELEGRAM_TOKEN  → Token del bot (de @BotFather)
-  GEMINI_KEY      → API Key de Google Gemini (gratis)
+  GROQ_KEY        → API Key de Groq (gratis)
   CHAT_ID         → Tu ID numérico de Telegram
 """
 
@@ -12,7 +12,7 @@ import json
 import asyncio
 import re
 from datetime import datetime, date
-import google.generativeai as genai
+from groq import Groq
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -20,13 +20,12 @@ from telegram.ext import (
 )
 
 TELEGRAM_TOKEN  = os.getenv("TELEGRAM_TOKEN")
-GEMINI_KEY      = os.getenv("GEMINI_KEY")
+GROQ_KEY        = os.getenv("GROQ_KEY")
 CHAT_ID         = os.getenv("CHAT_ID")
 TAREAS_FILE     = "tareas.json"
 RENOTIFICAR_MIN = 15
 
-genai.configure(api_key=GEMINI_KEY)
-modelo = genai.GenerativeModel("gemini-1.5-flash")
+client = Groq(api_key=GROQ_KEY)
 
 def cargar_tareas() -> list:
     if os.path.exists(TAREAS_FILE):
@@ -41,7 +40,7 @@ def guardar_tareas(tareas: list):
 def siguiente_id(tareas: list) -> int:
     return max((t["id"] for t in tareas), default=0) + 1
 
-def procesar_con_gemini(mensaje: str, tareas: list) -> dict:
+def procesar_con_groq(mensaje: str, tareas: list) -> dict:
     ahora = datetime.now().strftime("%Y-%m-%d %H:%M")
     tareas_resumen = [
         {"id": t["id"], "tarea": t["tarea"], "hora": t.get("hora"), "completada": t["completada"]}
@@ -53,22 +52,30 @@ Tareas actuales: {json.dumps(tareas_resumen, ensure_ascii=False)}
 El usuario dice: "{mensaje}"
 
 Responde ÚNICAMENTE con JSON válido, sin texto adicional ni comillas de código:
-{{"accion": "agregar"|"listar"|"completar"|"eliminar"|"conversar","tarea":"(si agregar)","hora":"HH:MM o null","id":0,"respuesta":"mensaje amigable corto en español"}}
+{{"accion": "agregar","tarea":"descripcion","hora":"HH:MM o null","id":0,"respuesta":"mensaje corto en español"}}
+
+Valores posibles de accion: agregar, listar, completar, eliminar, conversar
 
 Reglas:
 - "recuérdame X a las Y" → agregar con hora
-- "tengo que hacer X" sin hora → agregar hora=null  
-- "ya hice" o "listo" → completar
+- "tengo que hacer X" sin hora → agregar hora=null
+- "ya hice" o "listo" → completar con el id correspondiente
 - "qué tengo pendiente" → listar
-- otro → conversar"""
+- otro → conversar
+- respuesta máximo 2 oraciones, amigable"""
 
     try:
-        respuesta = modelo.generate_content(prompt)
-        texto = respuesta.text.strip()
+        respuesta = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
+            temperature=0.3
+        )
+        texto = respuesta.choices[0].message.content.strip()
         texto = re.sub(r"^```json\s*|\s*```$", "", texto, flags=re.MULTILINE).strip()
         return json.loads(texto)
     except Exception as e:
-        return {"accion": "conversar", "respuesta": f"Ups, tuve un problemita. ¿Puedes repetirme eso?"}
+        return {"accion": "conversar", "respuesta": "Ups, tuve un problemita. ¿Puedes repetirme eso?"}
 
 def boton_completar(tarea_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
@@ -103,7 +110,7 @@ async def cmd_pendientes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def manejar_mensaje(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     tareas = cargar_tareas()
-    resultado = procesar_con_gemini(update.message.text, tareas)
+    resultado = procesar_con_groq(update.message.text, tareas)
     accion = resultado.get("accion")
     if accion == "agregar":
         tareas.append({
@@ -213,7 +220,7 @@ def main():
         asyncio.create_task(loop_recordatorios(application))
         asyncio.create_task(loop_resumen_diario(application))
     app.post_init = post_init
-    print("🤖 Bot iniciado con Gemini. Esperando mensajes...")
+    print("🤖 Bot iniciado con Groq. Esperando mensajes...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
