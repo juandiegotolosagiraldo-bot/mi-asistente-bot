@@ -1,4 +1,3 @@
-
 """
 Asistente Personal - Bot de Telegram con Groq (GRATIS)
 ======================================================
@@ -7,6 +6,12 @@ Variables de entorno necesarias en Railway:
   GROQ_KEY        → API Key de Groq (gratis)
   CHAT_ID         → Tu ID numérico de Telegram
   TZ              → Europe/Berlin
+
+CAMBIO: Sistema de recordatorios simplificado
+  - Sin botones de confirmación
+  - Sin 3 confirmaciones
+  - Solo: recordatorio a la hora + último aviso a los 10 min
+  - Tú marcas como hecho escribiendo "hecho" o "listo"
 """
 
 import os
@@ -26,7 +31,6 @@ GROQ_KEY        = os.getenv("GROQ_KEY")
 CHAT_ID         = os.getenv("CHAT_ID")
 TAREAS_FILE     = "tareas.json"
 RUTINA_FILE     = "rutina.json"
-INTERVALO_MIN   = 5  # Minutos entre cada confirmación
 
 client = Groq(api_key=GROQ_KEY)
 
@@ -70,8 +74,9 @@ def cargar_rutina_del_dia():
                 "hora": item["hora"],
                 "completada": False,
                 "fecha": hoy,
-                "confirmaciones": 0,  # 0=sin iniciar, 1=primer hecho, 2=segundo, 3=completado
-                "notificaciones_enviadas": 0,
+                "recordatorio_enviado": False,
+                "ultimo_aviso_enviado": False,
+                "ultima_notificacion_ts": 0,
                 "es_rutina": True
             })
     if nuevas:
@@ -98,7 +103,7 @@ Responde ÚNICAMENTE con JSON válido sin texto adicional:
 
 Reglas:
 - "recuérdame X a las Y" → agregar
-- "ya hice / hecho / listo / confirmado" → completar con id correcto
+- "ya hice / hecho / listo / confirmado / done" → completar con id correcto
 - "qué tengo pendiente" → listar
 - "mi rutina diaria es..." → guardar_rutina con array rutina
 - "cuál es mi rutina" → ver_rutina
@@ -117,24 +122,6 @@ Reglas:
     except Exception:
         return {"accion": "conversar", "respuesta": "Ups, tuve un problemita. ¿Puedes repetirme eso?"}
 
-# ── Botones según nivel de confirmación ───────────────────────
-def boton_confirmacion(tarea_id: int, nivel: int) -> InlineKeyboardMarkup:
-    """
-    nivel 0 → primera notificación
-    nivel 1 → segunda confirmación
-    nivel 2 → confirmación final
-    """
-    textos = [
-        "✅ ¡Hecho!",
-        "✅ ¡Sí, lo hice!",
-        "✅ ¡Confirmado definitivamente!"
-    ]
-    label = textos[min(nivel, 2)]
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(label, callback_data=f"confirmar_{tarea_id}_{nivel}"),
-        InlineKeyboardButton("⏰ En 5 min", callback_data=f"posponer_{tarea_id}")
-    ]])
-
 # ── Handlers ───────────────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -143,6 +130,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "• _Recuérdame tomar agua a las 08:00_\n"
         "• _Tengo reunión a las 15:30_\n"
         "• _¿Qué tengo pendiente hoy?_\n\n"
+        "Para marcar como hecho:\n"
+        "• _Hecho_ · _Listo_ · _Ya lo hice_\n\n"
         "Para tu rutina:\n"
         "• _Mi rutina: despertar 07:00, ejercicio 08:00..._\n\n"
         "Comandos: /pendientes · /rutina",
@@ -159,9 +148,7 @@ async def cmd_pendientes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     texto = "📋 *Tus pendientes de hoy:*\n\n"
     for t in pendientes:
         hora = t.get("hora") or "sin hora"
-        conf = t.get("confirmaciones", 0)
-        estado = f"({conf}/3 ✓)" if conf > 0 else ""
-        texto += f"  #{t['id']} · {hora} → {t['tarea']} {estado}\n"
+        texto += f"  #{t['id']} · {hora} → {t['tarea']}\n"
     await update.message.reply_text(texto, parse_mode="Markdown")
 
 async def cmd_rutina(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -187,8 +174,9 @@ async def manejar_mensaje(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "hora": resultado.get("hora"),
             "completada": False,
             "fecha": date.today().isoformat(),
-            "confirmaciones": 0,
-            "notificaciones_enviadas": 0
+            "recordatorio_enviado": False,
+            "ultimo_aviso_enviado": False,
+            "ultima_notificacion_ts": 0,
         })
         guardar_tareas(tareas)
 
@@ -211,71 +199,24 @@ async def manejar_mensaje(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(resultado.get("respuesta", "Entendido ✅"), parse_mode="Markdown")
 
-async def manejar_boton(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    tareas = cargar_tareas()
+# ── Recordatorios automáticos — SIMPLIFICADOS ─────────────────
+# Flujo nuevo:
+#   1. A la hora exacta → "⏰ Recuerda: [tarea]"  (sin botones)
+#   2. 10 minutos después → "🔔 Último recordatorio: [tarea]"  (sin botones)
+#   3. Si escribes "hecho" o "listo" → se marca completada
+#   Sin más mensajes. Sin confirmaciones. Sin botones.
+# ──────────────────────────────────────────────────────────────
 
-    if data.startswith("confirmar_"):
-        partes = data.split("_")
-        tarea_id = int(partes[1])
-        nivel = int(partes[2])
-        nombre = ""
-
-        for t in tareas:
-            if t["id"] == tarea_id:
-                nombre = t["tarea"]
-                nuevo_nivel = nivel + 1
-                t["confirmaciones"] = nuevo_nivel
-                t["ultima_notificacion_ts"] = datetime.now().timestamp()
-
-                if nuevo_nivel >= 3:
-                    # ✅ Completado definitivamente
-                    t["completada"] = True
-                    await query.edit_message_text(
-                        f"🎉 *¡Excelente! '{nombre}' completada definitivamente.*\n¡Buen trabajo! 💪",
-                        parse_mode="Markdown"
-                    )
-                elif nuevo_nivel == 1:
-                    await query.edit_message_text(
-                        f"👍 Bien. En 5 minutos te pregunto de nuevo para confirmar que *'{nombre}'* sigue hecho.",
-                        parse_mode="Markdown"
-                    )
-                elif nuevo_nivel == 2:
-                    await query.edit_message_text(
-                        f"👍 Casi listo. En 5 minutos te pido la *confirmación final* de *'{nombre}'*.",
-                        parse_mode="Markdown"
-                    )
-                break
-
-        guardar_tareas(tareas)
-
-    elif data.startswith("posponer_"):
-        tarea_id = int(data.split("_")[1])
-        nombre = ""
-        for t in tareas:
-            if t["id"] == tarea_id:
-                t["posponer_hasta"] = datetime.now().timestamp() + INTERVALO_MIN * 60
-                nombre = t["tarea"]
-                break
-        guardar_tareas(tareas)
-        await query.edit_message_text(
-            f"⏰ Te recuerdo *'{nombre}'* en {INTERVALO_MIN} min.",
-            parse_mode="Markdown"
-        )
-
-# ── Recordatorios automáticos ──────────────────────────────────
 async def loop_recordatorios(app: Application):
     while True:
         await asyncio.sleep(60)
-        ahora = datetime.now()
+        ahora    = datetime.now()
         hora_actual = ahora.strftime("%H:%M")
-        hoy = date.today().isoformat()
+        hoy      = date.today().isoformat()
 
         cargar_rutina_del_dia()
-        tareas = cargar_tareas()
-        cambios = False
+        tareas   = cargar_tareas()
+        cambios  = False
 
         for t in tareas:
             if t["completada"] or t.get("fecha", hoy) != hoy:
@@ -285,67 +226,30 @@ async def loop_recordatorios(app: Application):
                 continue
 
             ahora_ts = ahora.timestamp()
-            confirmaciones = t.get("confirmaciones", 0)
-            ya_notificado = t.get("notificaciones_enviadas", 0) > 0
-            posponer_hasta = t.get("posponer_hasta", 0)
+            mins_desde_primera = (ahora_ts - t.get("ultima_notificacion_ts", 0)) / 60
 
-            if posponer_hasta and ahora_ts < posponer_hasta:
-                continue
-
-            mins_desde_ultima = (ahora_ts - t.get("ultima_notificacion_ts", 0)) / 60
-
-            # Primera notificación — hora exacta
-            if hora_tarea == hora_actual and not ya_notificado:
+            # ── Recordatorio 1: a la hora exacta ──────────────
+            if hora_tarea == hora_actual and not t.get("recordatorio_enviado"):
                 await app.bot.send_message(
                     chat_id=CHAT_ID,
-                    text=f"⏰ *Es hora de:* {t['tarea']}",
-                    reply_markup=boton_confirmacion(t["id"], 0),
+                    text=f"⏰ Recuerda: *{t['tarea']}*",
                     parse_mode="Markdown"
                 )
-                t["notificaciones_enviadas"] = 1
+                t["recordatorio_enviado"]  = True
+                t["ultimo_aviso_enviado"]  = False
                 t["ultima_notificacion_ts"] = ahora_ts
                 cambios = True
 
-            # Confirmación 2 — 5 min después del primer "hecho"
-            elif confirmaciones == 1 and mins_desde_ultima >= INTERVALO_MIN:
+            # ── Recordatorio 2: último aviso 10 min después ───
+            elif (t.get("recordatorio_enviado") and
+                  not t.get("ultimo_aviso_enviado") and
+                  mins_desde_primera >= 10):
                 await app.bot.send_message(
                     chat_id=CHAT_ID,
-                    text=f"🔔 *Segunda confirmación:* ¿Sigues habiendo hecho *{t['tarea']}*?",
-                    reply_markup=boton_confirmacion(t["id"], 1),
+                    text=f"🔔 Último recordatorio: *{t['tarea']}*",
                     parse_mode="Markdown"
                 )
-                t["ultima_notificacion_ts"] = ahora_ts
-                cambios = True
-
-            # Confirmación 3 — 5 min después de la segunda
-            elif confirmaciones == 2 and mins_desde_ultima >= INTERVALO_MIN:
-                await app.bot.send_message(
-                    chat_id=CHAT_ID,
-                    text=f"✅ *Confirmación final:* ¿Confirmas definitivamente que hiciste *{t['tarea']}*?",
-                    reply_markup=boton_confirmacion(t["id"], 2),
-                    parse_mode="Markdown"
-                )
-                t["ultima_notificacion_ts"] = ahora_ts
-                cambios = True
-
-            # Si no ha respondido nada, re-notificar cada 5 min
-            elif ya_notificado and confirmaciones == 0 and hora_tarea <= hora_actual and mins_desde_ultima >= INTERVALO_MIN:
-                veces = t["notificaciones_enviadas"]
-                frases = [
-                    f"👋 Oye, ¿ya hiciste: *{t['tarea']}*?",
-                    f"🔔 Sigo esperando tu confirmación: *{t['tarea']}*",
-                    f"📣 ¡Ey! ¿Ya lo hiciste: *{t['tarea']}*?",
-                    f"⚡ Te sigo recordando: *{t['tarea']}*",
-                ]
-                await app.bot.send_message(
-                    chat_id=CHAT_ID,
-                    text=frases[min(veces - 1, 3)],
-                    reply_markup=boton_confirmacion(t["id"], 0),
-                    parse_mode="Markdown"
-                )
-                t["notificaciones_enviadas"] = veces + 1
-                t["ultima_notificacion_ts"] = ahora_ts
-                t.pop("posponer_hasta", None)
+                t["ultimo_aviso_enviado"] = True
                 cambios = True
 
         if cambios:
@@ -379,7 +283,6 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("pendientes", cmd_pendientes))
     app.add_handler(CommandHandler("rutina", cmd_rutina))
-    app.add_handler(CallbackQueryHandler(manejar_boton))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_mensaje))
 
     async def post_init(application: Application):
