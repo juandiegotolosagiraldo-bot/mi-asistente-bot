@@ -173,49 +173,68 @@ def procesar_con_groq(mensaje: str, tareas: list, rutinas: list) -> dict:
         for r in rutinas
     ]
 
-    prompt = f"""Eres un asistente personal amigable que habla español. Siempre llamas al usuario "Juan Diego".
+    prompt = f"""Eres un asistente personal que habla español. Siempre llamas al usuario "Juan Diego".
+Tu trabajo principal es GUARDAR TAREAS. Ante cualquier duda, guarda la tarea.
 
 Fecha hoy: {hoy_str} ({DIAS_ES[ahora.weekday()]})
 Hora: {ahora.strftime("%H:%M")}
 Manana: {manana}
 Proximos dias: {json.dumps(proximos, ensure_ascii=False)}
-Tareas: {json.dumps(resumen_t, ensure_ascii=False)}
+Tareas guardadas: {json.dumps(resumen_t, ensure_ascii=False)}
 Rutinas: {json.dumps(resumen_r, ensure_ascii=False)}
 
-Mensaje: "{mensaje}"
+Mensaje de Juan Diego: "{mensaje}"
 
-RESPONDE SOLO CON JSON VALIDO. Sin texto extra. Sin markdown.
+RESPONDE SOLO CON JSON VALIDO. Sin texto extra. Sin comillas de codigo. Sin markdown.
 
 {{
   "accion": "agregar|agregar_rutina|completar|eliminar|eliminar_rutina|listar|listar_semana|listar_notas|listar_rutinas|conversar",
-  "tarea": "descripcion",
+  "tarea": "descripcion completa de la tarea",
   "fecha": "YYYY-MM-DD o null",
   "hora": "HH:MM o null",
   "patron_dias": "texto del patron de dias",
   "id": null,
-  "respuesta": "respuesta corta en espanol mencionando Juan Diego"
+  "respuesta": "confirmacion corta mencionando Juan Diego"
 }}
 
-REGLAS:
-- "recuerdame X todos los dias / lunes a viernes / cada lunes" -> agregar_rutina
-- "recuerdame X a las Y el [dia]" -> agregar, fecha=ese dia, hora=Y
-- "recuerdame X a las Y" sin dia -> agregar, fecha={hoy_str}, hora=Y
-- "el [dia] tengo X" -> agregar, fecha=ese dia, hora=null
-- "necesito X / pendiente X" sin fecha -> agregar, fecha=null, hora=null
-- "hecho/listo/ya hice" -> completar con id correcto
-- "eliminar rutina" -> eliminar_rutina
-- "mis rutinas" -> listar_rutinas
-- "que tengo hoy" -> listar
-- "que tengo esta semana" -> listar_semana
-- "notas mentales" -> listar_notas
-- hora SIEMPRE en HH:MM -- 3pm=15:00, 9am=09:00"""
+REGLAS CRITICAS — LEE CON ATENCION:
+
+SIEMPRE agregar cuando el mensaje mencione algo que hacer, recordar, comprar, cancelar, llamar, ir, etc.
+Ejemplos que SIEMPRE son agregar:
+  "el 12 de abril cancelar gemini"  -> agregar, fecha=2026-04-12, hora=null
+  "recuerdame llamar al banco"      -> agregar, fecha={hoy_str}, hora=null
+  "manana comprar leche"            -> agregar, fecha={manana}, hora=null
+  "el lunes tengo reunion"          -> agregar, fecha={proximos.get('lunes','')}, hora=null
+  "recuerdame X a las Y"            -> agregar, fecha={hoy_str}, hora=Y en HH:MM
+  "recuerdame X el [dia] a las Y"   -> agregar, fecha=ese dia, hora=Y en HH:MM
+  "necesito X / pendiente X"        -> agregar, fecha=null, hora=null
+
+RUTINAS (solo cuando dice todos los dias, lunes a viernes, cada semana, etc.):
+  "recuerdame X todos los dias"     -> agregar_rutina
+
+COMPLETAR solo cuando dice hecho, listo, ya lo hice, done, termine:
+  "hecho la reunion"                -> completar, id=el correcto
+
+LISTAR solo cuando pregunta que tiene:
+  "que tengo hoy"                   -> listar
+  "agenda de esta semana"           -> listar_semana
+
+CONVERSAR solo para saludos puros como "hola", "como estas", "gracias".
+NUNCA uses conversar si el mensaje menciona una tarea o accion concreta.
+
+Para fechas especificas como "el 12 de abril" -> calcular fecha correcta en formato YYYY-MM-DD
+Para meses: enero=01 febrero=02 marzo=03 abril=04 mayo=05 junio=06
+            julio=07 agosto=08 septiembre=09 octubre=10 noviembre=11 diciembre=12
+Año actual: 2026
+
+hora SIEMPRE en HH:MM: 3pm=15:00, 9am=09:00, mediodia=12:00"""
 
     try:
         r = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=350,
-            temperature=0.1
+            temperature=0.2
         )
         txt = r.choices[0].message.content.strip()
         txt = re.sub(r"^```json\s*|\s*```$", "", txt, flags=re.MULTILINE).strip()
