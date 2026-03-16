@@ -1,4 +1,5 @@
-"""
+
+      """
 Asistente Personal - Bot de Telegram con Groq (GRATIS)
 ======================================================
 Variables Railway:
@@ -174,7 +175,7 @@ def procesar_con_groq(mensaje: str, tareas: list, rutinas: list) -> dict:
         for r in rutinas
     ]
 
-    prompt = f"""Eres un asistente personal amigable que habla español.
+    prompt = f"""Eres un asistente personal amigable que habla español. Siempre llamas al usuario "Juan Diego".
 
 Fecha hoy: {hoy_str} ({DIAS_ES[ahora.weekday()]})
 Hora: {ahora.strftime("%H:%M")}
@@ -232,7 +233,7 @@ REGLAS:
 
 async def cmd_start(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await u.message.reply_text(
-        "👋 *¡Hola! Soy tu asistente personal.*\n\n"
+        "👋 *¡Hola, Juan Diego! Soy tu asistente personal.*\n\n"
         "Háblame natural:\n\n"
         "📅 *Con fecha y hora:*\n"
         "• _Recuérdame reunión el martes a las 3pm_\n"
@@ -260,7 +261,7 @@ async def cmd_pendientes(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     notas    = notas_sin_fecha(tareas)
     rutinas_h = rutinas_del_dia(hoy_num)
 
-    txt = f"📋 *Tus pendientes de hoy:*\n\n"
+    txt = f"📋 *Juan Diego — Tus pendientes de hoy:*\n\n"
 
     if rutinas_h:
         txt += "*🔁 Rutinas de hoy:*\n"
@@ -281,7 +282,7 @@ async def cmd_pendientes(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
             txt += f"  • {t['tarea']}\n"
 
     if not hoy_t and not notas and not rutinas_h:
-        txt = "🎉 ¡No tienes pendientes para hoy!"
+        txt = "🎉 ¡No tienes pendientes para hoy, Juan Diego!"
 
     await u.message.reply_text(txt, parse_mode="Markdown")
 
@@ -320,7 +321,7 @@ async def cmd_semana(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     tareas = cargar_tareas()
     notas  = notas_sin_fecha(tareas)
     hoy    = date.today()
-    txt    = "📅 *Tu agenda de esta semana:*\n\n"
+    txt    = "📅 *Juan Diego — Tu agenda de esta semana:*\n\n"
     tiene  = False
 
     for i in range(7):
@@ -348,7 +349,7 @@ async def cmd_semana(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
             txt += f"  • {t['tarea']}\n"
 
     if not tiene:
-        txt += "No tienes tareas esta semana. 🎉"
+        txt += "No tienes tareas esta semana, Juan Diego. 🎉"
 
     await u.message.reply_text(txt, parse_mode="Markdown")
 
@@ -534,7 +535,7 @@ async def loop_resumen_diario(app: Application):
             notas     = notas_sin_fecha(tareas)
             rutinas_h = rutinas_del_dia(hoy_num)
 
-            txt = f"🌅 *¡Buenos días! Agenda de hoy:*\n"
+            txt = f"🌅 *¡Buenos días, Juan Diego! Agenda de hoy:*\n"
             txt += f"_{DIAS_ES[hoy_num].capitalize()} {ahora.strftime('%d/%m')}_\n\n"
 
             if rutinas_h:
@@ -558,9 +559,9 @@ async def loop_resumen_diario(app: Application):
                     txt += f"  _...y {len(notas)-5} más. Usa /notas_\n"
 
             if not hoy_t and not notas and not rutinas_h:
-                txt += "No tienes tareas hoy. ¡Disfruta! 🎉"
+                txt += "No tienes tareas hoy, Juan Diego. ¡Disfruta! 🎉"
             else:
-                txt += "\n¡Mucho éxito! 💪"
+                txt += "\n¡Mucho éxito, Juan Diego! 💪"
 
             await app.bot.send_message(chat_id=CHAT_ID, text=txt, parse_mode="Markdown")
             ultima_fecha = ahora.date()
@@ -584,7 +585,7 @@ async def loop_plan_siguiente(app: Application):
             tareas_man  = tareas_del_dia(tareas, manana_str)
             rutinas_man = rutinas_del_dia(manana_num)
 
-            txt = f"🌙 *Buenas noches — Plan de mañana*\n"
+            txt = f"🌙 *Buenas noches, Juan Diego — Plan de mañana*\n"
             txt += f"_{dia_nombre} {manana.strftime('%d/%m')}_\n\n"
 
             if rutinas_man:
@@ -606,7 +607,7 @@ async def loop_plan_siguiente(app: Application):
             if notas:
                 txt += f"📎 {len(notas)} nota(s) mental(es) pendiente(s).\n"
 
-            txt += "\n_¡Que descanses bien!_ 😴"
+            txt += "\n_¡Que descanses bien, Juan Diego!_ 😴"
             await app.bot.send_message(chat_id=CHAT_ID, text=txt, parse_mode="Markdown")
             ultima_fecha = ahora.date()
 
@@ -657,7 +658,7 @@ async def loop_resumen_semanal(app: Application):
             tareas = cargar_tareas()
             notas  = notas_sin_fecha(tareas)
             hoy    = ahora.date()
-            txt    = "📅 *Tu semana que viene:*\n\n"
+            txt    = "📅 *Juan Diego — Tu semana que viene:*\n\n"
             tiene  = False
 
             for i in range(1, 8):
@@ -687,7 +688,7 @@ async def loop_resumen_semanal(app: Application):
             if not tiene:
                 txt += "No tienes tareas la semana que viene. 🎉"
 
-            txt += "\n_¡Que tengas una excelente semana!_ 💪"
+            txt += "\n_¡Que tengas una excelente semana, Juan Diego!_ 💪"
             await app.bot.send_message(chat_id=CHAT_ID, text=txt, parse_mode="Markdown")
             ultima_fecha = ahora.date()
 
